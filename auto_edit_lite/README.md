@@ -92,25 +92,41 @@ python3 edit_brain.py shotlist product_info.txt out/
 各カットには、企画の訴求軸、撮る内容の指示文、乗せるテロップ文言、
 表示秒数の目安、参考イメージ2枚が含まれる。
 
-スタッフはこの指示書を見ながら撮影し、カットの順番通りにファイルを
-アップロードすれば（ファイル名を`shot1.mp4`、`shot2.mp4`...のように
-揃えるなど運用ルールを決めておくとよい）、そのまま
-`lite_edit.py assemble`できる形の`seg_ai.json`相当を組み立てられる
-（`shotlist.json`の`shots`配列は`caption`/`duration`を持つため、
-アップロードされた動画ファイルと順番を対応させて`plan.json`相当の
-`segments`（`start`/`end`/`text`/`clip`）に変換する一手間が必要。
-現状は手動、または簡単な変換スクリプトが必要）。
-
 **なぜ実商品そのものの参考画像ではないか:** 参考イメージはGeminiの画像生成
 モデルで、実在のブランド名・ロゴ・パッケージの正確な形状を描かないよう
 指示して生成している。実商品の写真そのものではなく、あくまで「アングル・
 構図・光の当て方」の例として使うもの。
 
-**それでも撮影結果が指示通りになる保証はない。** 素人が指示を見ても
-商品を取り違えたり、カットの順番を間違えたりすることは起こりうるため、
-`edit_brain.py plan`（Gemini Visionによる商品一致チェック）を撮影後の
-安全網として併用することを推奨する。つまり「撮影前のカット割提案」と
-「撮影後のAI検証」は両方使う二段構えが最善という位置づけ。
+#### 撮影後の検品（`edit_brain.py verify`）: 指示通りに撮れているかAIが確認
+
+素人が指示書を見ても、商品を取り違えたり、カットの意図と違う画を撮って
+しまうことは起こりうる。そのため「撮影前のカット割提案」だけでなく、
+**撮影後にAIが検品する**ステップを用意している。スタッフには、カット割の
+順番通りに`shot1.mp4`、`shot2.mp4`...というファイル名でアップロードして
+もらう運用にする。
+
+```bash
+python3 lite_edit.py frames shot_frames/ --clips shot1.mp4 shot2.mp4 shot3.mp4 shot4.mp4 shot5.mp4
+python3 edit_brain.py verify out/shotlist.json shot_frames/manifest.json plan.json
+python3 lite_edit.py assemble plan.json assembled.mp4
+python3 lite_edit.py caption plan.json subs.ass
+python3 lite_edit.py render assembled.mp4 subs.ass final.mp4
+```
+
+- `edit_brain.py verify`は、`shotlist.json`の各カットの指示（`shot_description`
+  /`caption`）と、アップロードされたクリップの代表フレームをGemini Visionで
+  照合する。カット数とアップロードされたクリップ数が一致しない場合はエラーで
+  止まる（順番や本数の誤りに早期に気づける）。
+- 明らかな不一致（指示と違う被写体、指示された商品ではなく別商品が写っている
+  等）だけを`"verified": false`として`plan.json`に記録する。アングルの違い
+  など軽微なズレは許容し、不一致でも自動では除外しない（この後の判断は人が
+  行う前提）。`verify`実行時、不一致が疑われるカットは標準エラー出力にも
+  一覧表示される。
+- そのまま`lite_edit.py assemble`（`shotlist.json`で決めた秒数ぴったりに
+  クリップを切り出して結合）→`caption`→`render`で書き出せる。
+
+つまり「撮影前のカット割提案」＋「撮影後のAI検証」の二段構えが最善、という
+位置づけで両方実装・連携済み。
 
 ### ナレーション無しのB-roll素材から作る場合（台本モード）
 
@@ -221,6 +237,14 @@ python3 lite_edit.py render assembled.mp4 subs.ass final.mp4
   参考イメージは実商品ではなく構図・アングルのみを表すモックアップとして
   生成されるよう、ブランド名・ロゴ・パッケージ形状を描かないプロンプトに
   している。
+- 撮影後の検品モード（`edit_brain.py verify`）も実際のGemini APIキーで
+  動作確認済み。TIRTIRの実クリップ5本（カット割の意図通りのもの3本、
+  意図とズレるもの1本、別商品を意図的に混ぜたもの1本）を`shot1.mp4`〜
+  `shot5.mp4`としてカットに割り当てて検証したところ、別商品の意図的な
+  不一致（「塗布した肌」の指示に対し別商品のボトルが写っている）を正しく
+  検出し、「厳密な一致不要」の指示どおりアングルが多少ズレるだけのカットは
+  許容する、狙いどおりの挙動を確認した。検証結果付きの`plan.json`から
+  `assemble`→`caption`→`render`まで一気通貫で動くことも確認済み。
 - Gemini側のモデルは`gemini-2.5-flash`が新規ユーザー向けには廃止されていた
   ため、`gemini-3.8-flash`に変更済み（2026年時点の最新モデル名。将来的に
   また変わる可能性があるため、エラーが出た場合は`edit_brain.py`の

@@ -95,6 +95,30 @@ CLASSIFY_SYSTEM_PROMPT = """\
 }
 """
 
+VERIFY_SYSTEM_PROMPT = """\
+あなたはTikTok Shop向け動画素材の検品担当です。「撮影指示書」のカットごとの
+指示(shot_description、テロップ文言)と、実際にアップロードされた素材から
+抽出したフレーム画像を照合してください。
+
+各カットにつき複数枚の代表フレームが渡されます。画像の直前に
+"=== shot_0 ==="のようなテキストマーカーがあり、そのマーカーの直後に続く
+画像群が1つのカットに対応します。
+
+各カットについて、実際の映像が指示内容(shot_description)とおおむね一致して
+いるかを判定してください。厳密な一致は不要です。アングルや細部の違いは
+問題にせず、以下のような明らかな不一致のみ"match": falseとしてください。
+- 指示と全く違う被写体が写っている(例: パッケージのクローズアップの指示
+  なのに人物の顔しか写っていない)
+- 指示された商品そのものが写っていない、または別商品に見える
+
+# 出力形式 (JSON厳守、他の文章は一切出力しない)
+{
+  "results": [
+    {"id": "shot_0", "match": true, "note": "一言コメント"}
+  ]
+}
+"""
+
 PLAN_SYSTEM_PROMPT = """\
 あなたはTikTok Shop向け動画の企画・構成作家です。ナレーション無しの手元B-roll
 クリップ群(商品・見せ方が分類済み)と商品情報から、投稿動画の企画と構成を
@@ -279,6 +303,34 @@ def call_gemini_classify(manifest_items, product_info):
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=CLASSIFY_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            temperature=0.2,
+        ),
+    )
+
+    return json.loads(response.text)["results"]
+
+
+def call_gemini_verify_shotlist(shots, manifest_items):
+    from google.genai import types
+
+    client = _gemini_client()
+
+    shot_info = [{"index": i, "shot_description": s["shot_description"],
+                  "caption": s["caption"]} for i, s in enumerate(shots)]
+    parts = [json.dumps({"shots": shot_info}, ensure_ascii=False)]
+    for i, item in enumerate(manifest_items):
+        parts.append(f"=== shot_{i} ===")
+        for frame in item["frames"]:
+            frame_path = Path(frame)
+            mime = "image/png" if frame_path.suffix.lower() == ".png" else "image/jpeg"
+            parts.append(types.Part.from_bytes(data=frame_path.read_bytes(), mime_type=mime))
+
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=parts,
+        config=types.GenerateContentConfig(
+            system_instruction=VERIFY_SYSTEM_PROMPT,
             response_mime_type="application/json",
             temperature=0.2,
         ),
@@ -631,6 +683,59 @@ def main_plan():
           f"({len(segments)}カット・合計{t:.1f}秒) -> {out_path}")
 
 
+def main_verify():
+    if len(sys.argv) != 5:
+        print("usage: edit_brain.py verify shotlist.json manifest.json plan.json",
+              file=sys.stderr)
+        sys.exit(1)
+
+    shotlist_path, manifest_path, out_path = sys.argv[2:5]
+
+    with open(shotlist_path, encoding="utf-8") as f:
+        shotlist = json.load(f)
+
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    shots = shotlist["shots"]
+    if len(shots) != len(manifest):
+        print(f"カット数({len(shots)})とアップロードされたクリップ数"
+              f"({len(manifest)})が一致しません。shotlist.jsonのカット順と"
+              f"同じ本数・同じ順番でクリップを用意してください。",
+              file=sys.stderr)
+        sys.exit(1)
+
+    results = call_gemini_verify_shotlist(shots, manifest)
+
+    segments = []
+    t = 0.0
+    mismatches = []
+    for i, (shot, result) in enumerate(zip(shots, results)):
+        dur = max(0.5, float(shot["duration"]))
+        match = bool(result.get("match", True))
+        segments.append({"start": t, "end": t + dur, "text": shot["caption"],
+                          "clip": manifest[i]["clip"], "verified": match})
+        if not match:
+            mismatches.append((i + 1, result.get("note", "")))
+        t += dur
+
+    out = {"concept": shotlist["concept"], "segments": segments,
+           "hashtags": shotlist["hashtags"]}
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+
+    if mismatches:
+        print(f"[edit_brain] 警告: {len(mismatches)}カットで指示と映像が "
+              f"一致していない可能性があります。内容を確認してください:",
+              file=sys.stderr)
+        for idx, note in mismatches:
+            print(f"  - カット{idx}: {note}", file=sys.stderr)
+
+    print(f"[edit_brain] {len(segments)}カット・合計{t:.1f}秒 "
+          f"(不一致疑い{len(mismatches)}件) -> {out_path}")
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "script":
         main_script()
@@ -644,12 +749,17 @@ def main():
         main_shotlist()
         return
 
+    if len(sys.argv) >= 2 and sys.argv[1] == "verify":
+        main_verify()
+        return
+
     if len(sys.argv) != 5:
         print("usage: edit_brain.py seg.json product_info.txt "
               "seg_ai.json highlight.json\n"
               "       edit_brain.py script product_info.txt seg_ai.json\n"
               "       edit_brain.py plan manifest.json product_info.txt plan.json\n"
-              "       edit_brain.py shotlist product_info.txt outdir",
+              "       edit_brain.py shotlist product_info.txt outdir\n"
+              "       edit_brain.py verify shotlist.json manifest.json plan.json",
               file=sys.stderr)
         sys.exit(1)
 
