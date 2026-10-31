@@ -1,0 +1,40 @@
+[
+  {
+    "id": "c0001",
+    "product_name": "香水 SAYU",
+    "talent_name": "内田莉央",
+    "clip_url": "https://x.com/mchan_0727",
+    "brand": "AHRES",
+    "talent_handle": "@mchan_0727",
+    "platform_origin": "X",
+    "content_type": "著名人の愛用シーン(ストーリーズ/動画)切り抜き+美容系アカウント引用連鎖",
+    "hook_pattern": [
+      "著名人重ね掛け",
+      "権威性",
+      "FOMO"
+    ],
+    "engagement_note": "起点投稿412万imp。第1波全体: 美容系10アカウント引用、12投稿で約930万imp、引用投稿エンゲージ率0.53%(起点0.08%の約7倍)",
+    "source_method": "manual_url",
+    "discovered_at": "2026-10-31",
+    "note": "起点は2投稿(@mchan_0727 412万imp, @urutsuyachan 386万imp)。投稿文で『内田莉央さん・なごみさん・ちぴさんも激推し』と複数名を重ねる訴求。出典: AnyMind社内事例資料(CONFIDENTIAL、2026-10-22時点のX公開値)。実施時期2026/9/5-6。"
+  },
+  {
+    "id": "c0002",
+    "product_name": "新作クレンジング",
+    "talent_name": "村重杏奈",
+    "clip_url": "https://x.com/urutsuyachan",
+    "brand": "AHRES",
+    "talent_handle": "@urutsuyachan",
+    "platform_origin": "X",
+    "content_type": "著名人の愛用シーン切り抜き+美容系アカウント引用連鎖(香水キャンペーンからの接続展開)",
+    "hook_pattern": [
+      "資産化(前施策の話題を再利用)",
+      "ビフォーアフター/素肌訴求",
+      "権威性"
+    ],
+    "engagement_note": "起点2投稿(73万imp, 188万imp)+引用8投稿で約389万imp。引用投稿エンゲージ率は起点の約6倍。2波合計1,319万imp、ブックマーク4,444件。",
+    "source_method": "manual_url",
+    "discovered_at": "2026-10-31",
+    "note": "第1波(香水SAYU)の話題を入口に、村重杏奈さんの使用シーンを切り抜く引用連鎖でクレンジングへ展開。@urutsuyachanは両波で起点、第2波では自身の9/21投稿(約475万imp)を引用する形。出典: AnyMind社内事例資料(CONFIDENTIAL)。実施時期2026/10/7-8。"
+  }
+]

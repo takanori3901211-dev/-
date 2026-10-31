@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+casting_research/output/*
+!casting_research/output/.gitkeep
