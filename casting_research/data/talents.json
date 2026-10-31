@@ -1,1 +1,46 @@
-[]
+[
+  {
+    "id": "t0001",
+    "name": "内田莉央",
+    "x_handle": "",
+    "tiktok_handle": "",
+    "instagram_handle": "",
+    "youtube_handle": "",
+    "genre": "著名人/インフルエンサー(詳細未確認)",
+    "note": "AHRES『SAYU』第1波(2026/9/5-6)で、著名人名の重ね掛け訴求に使われた名前の一人。なごみ・ちぴと共に言及。",
+    "created_at": "2026-10-31"
+  },
+  {
+    "id": "t0002",
+    "name": "なごみ",
+    "x_handle": "",
+    "tiktok_handle": "",
+    "instagram_handle": "",
+    "youtube_handle": "",
+    "genre": "著名人/インフルエンサー(詳細未確認)",
+    "note": "AHRES『SAYU』第1波(2026/9/5-6)で、著名人名の重ね掛け訴求に使われた名前の一人。",
+    "created_at": "2026-10-31"
+  },
+  {
+    "id": "t0003",
+    "name": "ちぴ",
+    "x_handle": "",
+    "tiktok_handle": "",
+    "instagram_handle": "",
+    "youtube_handle": "",
+    "genre": "著名人/インフルエンサー(詳細未確認)",
+    "note": "AHRES『SAYU』第1波(2026/9/5-6)で、著名人名の重ね掛け訴求に使われた名前の一人。",
+    "created_at": "2026-10-31"
+  },
+  {
+    "id": "t0004",
+    "name": "村重杏奈",
+    "x_handle": "",
+    "tiktok_handle": "",
+    "instagram_handle": "",
+    "youtube_handle": "",
+    "genre": "タレント",
+    "note": "AHRES新作クレンジング 第2波(2026/10/7-8)で、使用シーンが切り抜かれ引用連鎖の起点となった。",
+    "created_at": "2026-10-31"
+  }
+]
