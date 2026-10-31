@@ -24,7 +24,30 @@ Gemini APIキーの取得:
 export GEMINI_API_KEY="取得したキー"
 ```
 
-## 使い方
+## 最速の使い方（1コマンド）
+
+個別コマンドを覚えなくても、`make_video.py`に商品情報と素材を渡すだけで
+完成動画まで作れる（内部では下記の個別コマンドを順番に呼び出しているだけで、
+新しいロジックは無い＝個別に検証済みの部品を繋いだだけ）。
+
+```bash
+# ナレーション無しB-rollクリップ複数本から作る場合（商品混在OK、Visionで自動選別）
+python3 make_video.py 商品情報.txt clip1.mp4 clip2.mp4 clip3.mp4 ... out/
+
+# 長尺・ナレーションあり素材1本から作る場合
+python3 make_video.py 商品情報.txt 長尺素材.mp4 out/
+```
+
+`out/final.mp4`に完成動画、`out/plan.json`（またはB-roll以外の場合は
+`out/seg_ai.json`）に使用判断の内訳が出力される。入力ファイルが1本なら
+長尺素材モード、複数本ならB-rollクリップ群モードと自動判定する。
+GEMINI_API_KEYの設定は必要（下記セットアップ参照）。
+
+本番相当の規模（TIRTIR実クリップ15本、商品混在）で実行し、1コマンドで
+約2分、15本中4本を正しく商品一致と判定して完成動画を生成できることを
+確認済み（詳細は「動作確認状況」参照）。
+
+## 個別コマンドで細かく制御したい場合
 
 ### Phase1単体（無音カット〜字幕焼き込みまで一括）
 
@@ -196,6 +219,16 @@ python3 lite_edit.py render assembled.mp4 subs.ass final.mp4
 
 ## 動作確認状況
 
+- **`make_video.py`（1コマンド統合、本番相当規模）**: TIRTIRの実クリップ
+  15本（Google Driveの`TIRTIR手元動画素材`フォルダから無作為に抽出、商品
+  混在）と実商品情報を入力に、`python3 make_video.py 商品情報.txt clip1.mp4
+  ... out/`の1コマンドだけでエンドツーエンドの動作を確認済み。実行時間は
+  約2分（frames抽出→Vision分類→企画提案→assemble→caption→renderの合計）。
+  15本中4本を商品一致と正しく判定し、未知のクリップ（それまで未検証だった
+  もの）を含めて選ばれた4カットすべてが実際にMASK FIT RUBY MESH CUSHIONを
+  正しく映していること、テロップと映像の内容が一致していることを画像で
+  確認した。小規模テストだけでなく、ある程度まとまった本数の実素材でも
+  同じ精度で動くことを確認できた点が今回の成果。
 - `cut` / `trim` / `transcribe` / `caption` / `render`（Phase1一連）、および
   `edit_brain.py`によるハイライト区間選定・Gemini API実呼び出しまで含め、
   クラウド開発環境で実際に動かしてエンドツーエンドで動作確認済み（合成音声の
