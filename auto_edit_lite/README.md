@@ -53,19 +53,26 @@ python3 lite_edit.py cut 素材.mp4 cut.mp4
 python3 lite_edit.py transcribe cut.mp4 seg.json
 python3 edit_brain.py seg.json product_info.txt seg_ai.json
 python3 lite_edit.py caption seg_ai.json subs.ass
-python3 lite_edit.py render cut.mp4 subs.ass final.mp4 --hook-freeze 2.3
+python3 lite_edit.py render cut.mp4 subs.ass final.mp4 --hook-freeze 2.3 --cta-freeze 2.3
 ```
 
-`--hook-freeze` にはPhase2が追加したフックの秒数（`edit_brain.py` の
-`HOOK_DURATION`、デフォルト2.3秒）を指定する。先頭をその秒数分だけ
-静止＋無音にして、テロップと映像の時間軸を同期させる。
+`--hook-freeze` にはPhase2が先頭に追加したフックの秒数、`--cta-freeze` には
+末尾に追加したCTAの秒数（いずれも`edit_brain.py`の`HOOK_DURATION`、デフォルト
+2.3秒）を指定する。先頭/末尾をその秒数分だけ静止＋無音で延長し、テロップと
+映像の時間軸を同期させる。**`--cta-freeze`を指定し忘れると、CTAのテロップが
+表示しきる前に映像が終わってしまうので注意。**
 
 ## 動作確認状況
 
-- `cut` / `transcribe` / `caption` / `render`（Phase1一連）はクラウド開発環境で
-  ffmpeg・faster-whisperを実際に動かして動作確認済み。ただし本物のTikTok Shop
-  素材・自宅Macの実環境（Apple Silicon等）では未検証。
-- `edit_brain.py`のGemini API呼び出しは未検証（APIキー未取得のため）。
+- `cut` / `transcribe` / `caption` / `render`（Phase1一連）、および
+  `edit_brain.py`によるGemini API実呼び出しまで含め、クラウド開発環境で
+  実際に動かしてエンドツーエンドで動作確認済み（合成音声のテスト素材、
+  実際に取得したGemini APIキーを使用）。ただし本物のTikTok Shop素材・
+  自宅Macの実環境（Apple Silicon等）では未検証。
+- Gemini側のモデルは`gemini-2.5-flash`が新規ユーザー向けには廃止されていた
+  ため、`gemini-3.8-flash`に変更済み（2026年時点の最新モデル名。将来的に
+  また変わる可能性があるため、エラーが出た場合は`edit_brain.py`の
+  `call_gemini()`内のモデル名を確認すること）。
 - faster-whisperが内部で使うPyAV(`av`パッケージ)はバージョンによっては
   `model.transcribe()`実行時に`TypeError: open() got an unexpected keyword
   argument 'metadata_errors'`のようなエラーで落ちることがある。本ツールは

@@ -72,7 +72,7 @@ def call_gemini(segments, product_info):
     )
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=user_content,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,

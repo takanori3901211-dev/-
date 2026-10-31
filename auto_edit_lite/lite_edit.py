@@ -208,9 +208,19 @@ def cmd_render(args):
 
     af = "loudnorm=I=-14:TP=-1.0:LRA=11"
 
+    # tpadはstart/stopを別々のフィルタインスタンスとして連結すると
+    # stop側のパディング長が正しく計算されないため、1つのtpad呼び出しに
+    # start_duration/stop_durationをまとめて指定する。
+    tpad_opts = []
     if args.hook_freeze and args.hook_freeze > 0:
-        vf = f"{vf},tpad=start_duration={args.hook_freeze}:start_mode=clone"
+        tpad_opts.append(f"start_duration={args.hook_freeze}:start_mode=clone")
         af = f"adelay={int(args.hook_freeze * 1000)}|{int(args.hook_freeze * 1000)},{af}"
+    if args.cta_freeze and args.cta_freeze > 0:
+        tpad_opts.append(f"stop_duration={args.cta_freeze}:stop_mode=clone")
+        af = f"{af},apad=pad_dur={args.cta_freeze}"
+
+    if tpad_opts:
+        vf = f"{vf},tpad={':'.join(tpad_opts)}"
 
     vf = f"{vf},ass={args.subs}"
 
@@ -240,7 +250,8 @@ def cmd_all(args):
     cmd_transcribe(argparse.Namespace(input=cut_path, output=seg_path))
     cmd_caption(argparse.Namespace(input=seg_path, output=ass_path))
     cmd_render(argparse.Namespace(input=cut_path, subs=ass_path,
-                                   output=final_path, hook_freeze=0))
+                                   output=final_path, hook_freeze=0,
+                                   cta_freeze=0))
 
     print(f"[all] 完了 -> {final_path}")
 
@@ -272,6 +283,8 @@ def build_parser():
     sp.add_argument("output")
     sp.add_argument("--hook-freeze", type=float, default=0.0,
                      help="Phase2で先頭に追加したフック秒数分、映像を静止+無音にする")
+    sp.add_argument("--cta-freeze", type=float, default=0.0,
+                     help="Phase2で末尾に追加したCTA秒数分、映像を静止+無音で延長する")
     sp.set_defaults(func=cmd_render)
 
     sp = sub.add_parser("all", help="cut->transcribe->caption->renderを一括実行")
