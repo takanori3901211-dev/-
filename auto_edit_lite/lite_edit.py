@@ -366,6 +366,22 @@ def _wrap(text, max_chars=14):
     return r"\N".join(lines)
 
 
+MAX_CAPTION_LINES = 3
+
+
+def _split_segment(text, max_lines=MAX_CAPTION_LINES, max_chars=14):
+    """1つの文字起こしセグメントを、折り返してもmax_lines行を超えない
+    チャンクに分割する(句読点/スペース際で分割)。無音区間が無い長尺の
+    1セグメントが縦に5行以上などセーフゾーンを超えて表示されるのを防ぐ。"""
+    chunk_limit = max_lines * max_chars
+    chunks = []
+    remaining = text.strip()
+    while remaining:
+        chunk, remaining = _split_once(remaining, chunk_limit)
+        chunks.append(chunk)
+    return chunks
+
+
 def _ass_time(seconds):
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
@@ -394,16 +410,32 @@ def cmd_caption(args):
         data = json.load(f)
 
     lines = [ASS_HEADER]
+    count = 0
     for seg in data["segments"]:
-        text = _wrap(seg["text"])
-        start = _ass_time(seg["start"])
-        end = _ass_time(seg["end"])
-        lines.append(f"Dialogue: 0,{start},{end},Caption,,0,0,0,,{text}\n")
+        text = seg["text"].strip()
+        if not text:
+            continue
+
+        chunks = _split_segment(text)
+        seg_start, seg_end = seg["start"], seg["end"]
+        duration = seg_end - seg_start
+        total_chars = sum(len(c) for c in chunks)
+
+        cursor = seg_start
+        for i, chunk in enumerate(chunks):
+            is_last = i == len(chunks) - 1
+            chunk_end = seg_end if is_last else cursor + duration * (len(chunk) / total_chars)
+            lines.append(
+                f"Dialogue: 0,{_ass_time(cursor)},{_ass_time(chunk_end)},"
+                f"Caption,,0,0,0,,{_wrap(chunk)}\n"
+            )
+            cursor = chunk_end
+            count += 1
 
     with open(args.output, "w", encoding="utf-8") as f:
         f.writelines(lines)
 
-    print(f"[caption] {len(data['segments'])}行 -> {args.output}")
+    print(f"[caption] {count}行 -> {args.output}")
 
 
 def cmd_render(args):
