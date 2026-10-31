@@ -45,12 +45,24 @@ def _speech_segments(duration, silences):
     """無音区間の補集合（発話区間）を、マージンと短い隙間の結合込みで作る。"""
     speech = []
     cursor = 0.0
-    for s_start, s_end in silences:
+    last_index = len(silences) - 1
+    for i, (s_start, s_end) in enumerate(silences):
         seg_start = cursor
-        seg_end = min(s_start + SILENCE_MARGIN, duration)
+        # cursor(直前の無音の終わり)がこの無音の開始にすでに達している場合、
+        # 直前に実発話は無い。その状態でs_start+MARGINまで食い込ませると、
+        # 素材が無音で始まる/無音区間が連続するケースで無音そのものを発話と
+        # 誤認してしまう（ファイル先頭が無音の素材で実際に発生したバグ）。
+        if seg_start < s_start:
+            seg_end = min(s_start + SILENCE_MARGIN, duration)
+        else:
+            seg_end = seg_start
         if seg_end > seg_start:
             speech.append([seg_start, seg_end])
-        cursor = max(s_end - SILENCE_MARGIN, seg_end)
+        if i == last_index and s_end >= duration:
+            # 素材が無音のまま終わる場合、末尾にもう発話は無い。
+            cursor = duration
+        else:
+            cursor = max(s_end - SILENCE_MARGIN, seg_end)
     if cursor < duration:
         speech.append([cursor, duration])
 
