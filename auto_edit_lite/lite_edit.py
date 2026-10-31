@@ -92,6 +92,18 @@ def cmd_cut(args):
     print(f"[cut] {len(segments)}個の発話区間を結合 -> {args.output}")
 
 
+def cmd_trim(args):
+    with open(args.highlight, encoding="utf-8") as f:
+        highlight = json.load(f)
+
+    start, end = highlight["start"], highlight["end"]
+    _run(["ffmpeg", "-y", "-i", str(args.input), "-ss", str(start),
+          "-to", str(end), "-c:v", "libx264", "-preset", "fast",
+          "-c:a", "aac", str(args.output)])
+
+    print(f"[trim] {start:.1f}s-{end:.1f}s -> {args.output}")
+
+
 def _decode_audio_16k_mono(path):
     """ffmpegで直接PCMにデコードしてnumpy配列で返す。
 
@@ -266,6 +278,12 @@ def build_parser():
     sp.add_argument("threshold_db", nargs="?", type=float, default=-35.0)
     sp.add_argument("min_silence", nargs="?", type=float, default=0.6)
     sp.set_defaults(func=cmd_cut)
+
+    sp = sub.add_parser("trim", help="highlight.jsonの区間でcut.mp4を切り出す")
+    sp.add_argument("input")
+    sp.add_argument("highlight")
+    sp.add_argument("output")
+    sp.set_defaults(func=cmd_trim)
 
     sp = sub.add_parser("transcribe", help="文字起こし")
     sp.add_argument("input")
