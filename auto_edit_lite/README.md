@@ -83,6 +83,8 @@ python3 lite_edit.py render clip.mp4 subs.ass final.mp4 --hook-freeze 2.3 --cta-
 Geminiに台本（フック/本文テロップ/CTA）をゼロから書かせ、複数のB-rollクリップを
 結合した映像に重ねる。
 
+シンプルな方法（渡すクリップが全て同一商品だと確認済みの場合）:
+
 ```bash
 python3 edit_brain.py script product_info.txt seg_ai.json
 python3 lite_edit.py broll broll.mp4 --target-duration 16.0 --clips clip1.mp4 clip2.mp4 ...
@@ -97,16 +99,47 @@ python3 lite_edit.py render broll.mp4 subs.ass final.mp4
   なるよう結合する。各クリップの実尺を上限に、短いクリップで埋まらなかった
   分は他の（特に長い）クリップに自動で再配分する。
 
-**重要: 渡すクリップは全て同一商品のものであることを必ず確認すること。**
-TIRTIRの「大量動画素材_切り抜き用」フォルダ（35クリップ）で検証した際、
-同じフォルダ内に **複数の商品（MASK FIT RUBY MESH CUSHION / REFLECT GLOW
+#### 企画提案モード（推奨）: クリップの商品が混在している場合
+
+TIRTIRの「TIRTIR手元動画素材」フォルダ（35クリップ）で検証した際、
+同じフォルダ内に**複数の商品（MASK FIT RUBY MESH CUSHION / REFLECT GLOW
 PREP PRIMER / MASK FIT TONE UP ESSENCE 等）のB-rollが混在**しており、
 商品を確認せずに先頭から数クリップを機械的に選んだところ、テロップで
 紹介している商品と映像に映っている商品が異なる動画になってしまった
 （商品名・ブランド名の誤表示はNG事項として明示的に禁止されている）。
-本ツールはクリップの中身（商品）を自動判定する機能を持たないため、
-`broll`に渡す前に目視（またはGemini Visionなどを使った分類処理の追加実装）で
-商品が一致しているか必ず確認すること。
+
+この問題に対応するため、Gemini Vision（画像認識）でクリップごとに
+「どの商品が写っているか」「どんなカット（パッケージ/テクスチャ/使用シーン等）か」
+を自動分類し、商品情報に一致するクリップだけを使って企画（どの魅力を軸に
+訴求するか）と各カットのテロップ・並び順を提案させるモード。
+
+```bash
+python3 lite_edit.py frames frames/ --clips clip1.mp4 clip2.mp4 clip3.mp4 ...
+python3 edit_brain.py plan frames/manifest.json product_info.txt plan.json
+python3 lite_edit.py assemble plan.json assembled.mp4
+python3 lite_edit.py caption plan.json subs.ass
+python3 lite_edit.py render assembled.mp4 subs.ass final.mp4
+```
+
+- `lite_edit.py frames`は各クリップの15%/50%/85%地点から代表フレームを
+  3枚ずつ抽出する（1枚だけだとブランド名が写っていない瞬間を拾って
+  分類精度が落ちることがあるため複数枚にしている）。
+- `edit_brain.py plan`はまずGemini Visionで各クリップの商品・カット種別を
+  分類し、商品情報に一致しないクリップを除外する。残ったクリップと商品情報
+  から、訴求軸（企画）・各テロップの文面・対応するクリップ・表示秒数を
+  一括で提案し、`plan.json`に出力する（`caption`コマンドがそのまま読める
+  `segments`形式に、使用クリップの`clip`フィールドを足した形式）。
+- `lite_edit.py assemble`は`plan.json`の各カットが指定する秒数ぴったりに
+  クリップを切り出して結合する（クリップの実尺が足りない場合は末尾を
+  静止させて延長する）。
+
+**それでも完全ではないことに注意。** TIRTIRでの検証では、黒いコンパクトを
+開けた状態のクリップ（ブランド名が写っていない角度）を「商品不明」として
+正しく除外する一方で、同一商品の別カット（コンパクトのクローズアップ）も
+一致クリップが少なければ使われず、動画が同じカットの繰り返しになることが
+あった。これはテロップと違う商品を映すよりは安全な失敗の仕方だが、
+本番運用では「AIによる自動分類」よりも「アップロード時に商品ごとに
+フォルダを分けて管理する」運用のほうが確実性が高い。
 
 ## 動作確認状況
 
@@ -134,6 +167,14 @@ PREP PRIMER / MASK FIT TONE UP ESSENCE 等）のB-rollが混在**しており、
   には異なる商品（PRIMER・TONE UP ESSENCE等）が混在しており、クリップ選定を
   誤ると商品不一致の動画になることが実際に起きたため、`broll`に渡すクリップは
   事前に目視確認が必須。
+- 企画提案モード（`lite_edit.py frames` + `edit_brain.py plan` +
+  `lite_edit.py assemble`）も同じTIRTIR素材（5クリップ、商品混在）で
+  エンドツーエンドで動作確認済み。Gemini Visionによる商品分類は、ブランド名が
+  はっきり写っているカット（ルビー色のキャップ）は正しく一致と判定する一方、
+  ブランド名が写っていない角度のカット（開いた状態の黒いコンパクト内側）は
+  安全側に倒して「商品不一致／不明」として除外することを確認した
+  （誤って別商品のクリップを混ぜるよりは好ましい挙動だが、その分だけ
+  使えるクリップが絞られ、同じカットの繰り返しになりやすい）。
 - Gemini側のモデルは`gemini-2.5-flash`が新規ユーザー向けには廃止されていた
   ため、`gemini-3.8-flash`に変更済み（2026年時点の最新モデル名。将来的に
   また変わる可能性があるため、エラーが出た場合は`edit_brain.py`の

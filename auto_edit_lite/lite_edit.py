@@ -169,6 +169,86 @@ def cmd_broll(args):
     print(f"[broll] {len(clips)}クリップを結合(合計{total:.1f}秒) -> {args.output}")
 
 
+FRAME_SAMPLE_POINTS = (0.15, 0.5, 0.85)  # クリップ長に対する割合
+
+
+def cmd_frames(args):
+    """各クリップから複数の代表フレーム(クリップ長の15%/50%/85%地点)を抽出し、
+    edit_brain.py planに渡すmanifest.jsonを作る。
+
+    1フレームだけだと、たまたまブランド名/商品名が写っていない瞬間を
+    拾ってしまい、AIによる商品分類の精度が落ちることがあるため複数枚にする。
+    """
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    manifest = []
+    for clip in args.clips:
+        clip_path = Path(clip)
+        dur = _ffprobe_duration(clip_path)
+        frame_paths = []
+        for i, ratio in enumerate(FRAME_SAMPLE_POINTS):
+            ts = max(0.0, min(dur * ratio, max(dur - 0.05, 0.0)))
+            frame_path = outdir / f"{clip_path.stem}_{i}.png"
+            _run(["ffmpeg", "-y", "-i", str(clip_path), "-ss", str(ts),
+                  "-frames:v", "1", str(frame_path)])
+            frame_paths.append(str(frame_path.resolve()))
+        manifest.append({"clip": str(clip_path.resolve()), "frames": frame_paths})
+
+    manifest_path = outdir / "manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+    print(f"[frames] {len(manifest)}クリップ x {len(FRAME_SAMPLE_POINTS)}フレーム -> {manifest_path}")
+
+
+def cmd_assemble(args):
+    """plan.jsonのセグメントに従い、各セグメントが参照するクリップを
+    割り当てられた秒数ぴったりに切り出して結合する(足りない分は末尾を
+    静止させて延長)。"""
+    with open(args.plan, encoding="utf-8") as f:
+        plan = json.load(f)
+
+    segments = plan["segments"]
+    if not segments:
+        print("plan.jsonにsegmentsがありません。", file=sys.stderr)
+        sys.exit(1)
+
+    tmpdir = Path(args.output).parent / f".{Path(args.output).stem}_assemble_parts"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    list_path = tmpdir / "concat.txt"
+
+    vf_base = (f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=increase,"
+               f"crop={VIDEO_W}:{VIDEO_H},setsar=1")
+
+    with open(list_path, "w") as f:
+        for i, seg in enumerate(segments):
+            clip = seg["clip"]
+            dur = seg["end"] - seg["start"]
+            avail = _ffprobe_duration(clip)
+            part = tmpdir / f"part_{i:04d}.mp4"
+
+            if avail >= dur:
+                _run(["ffmpeg", "-y", "-i", str(clip), "-t", str(dur),
+                      "-vf", vf_base, "-c:v", "libx264", "-preset", "fast",
+                      "-c:a", "aac", "-ar", "44100", "-ac", "1", str(part)])
+            else:
+                pad = dur - avail
+                vf = f"{vf_base},tpad=stop_duration={pad}:stop_mode=clone"
+                _run(["ffmpeg", "-y", "-i", str(clip),
+                      "-vf", vf, "-af", f"apad=pad_dur={pad}",
+                      "-c:v", "libx264", "-preset", "fast",
+                      "-c:a", "aac", "-ar", "44100", "-ac", "1", str(part)])
+
+            f.write(f"file '{part.resolve()}'\n")
+
+    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+          "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(args.output)])
+
+    total = segments[-1]["end"]
+    print(f"[assemble] {len(segments)}カット・合計{total:.1f}秒 -> {args.output}")
+
+
 def _decode_audio_16k_mono(path):
     """ffmpegで直接PCMにデコードしてnumpy配列で返す。
 
@@ -355,6 +435,16 @@ def build_parser():
     sp.add_argument("--target-duration", type=float, required=True)
     sp.add_argument("--clips", nargs="+", required=True)
     sp.set_defaults(func=cmd_broll)
+
+    sp = sub.add_parser("frames", help="各クリップの代表フレームを抽出しmanifest.jsonを作る")
+    sp.add_argument("outdir")
+    sp.add_argument("--clips", nargs="+", required=True)
+    sp.set_defaults(func=cmd_frames)
+
+    sp = sub.add_parser("assemble", help="企画(plan.json)に従ってクリップを結合する")
+    sp.add_argument("plan")
+    sp.add_argument("output")
+    sp.set_defaults(func=cmd_assemble)
 
     sp = sub.add_parser("transcribe", help="文字起こし")
     sp.add_argument("input")

@@ -9,6 +9,7 @@ import copy
 import json
 import os
 import sys
+from pathlib import Path
 
 HOOK_DURATION = 2.3
 HOOK_GAP = 0.1
@@ -68,6 +69,73 @@ SCRIPT_SYSTEM_PROMPT = """\
   "cta": {"text": "...", "duration": 2.3},
   "hashtags": ["...", "...", "..."]
 }
+"""
+
+CLASSIFY_SYSTEM_PROMPT = """\
+あなたはTikTok Shop向け動画素材の仕分け担当です。複数の画像が渡されます。
+各クリップにつき、クリップ内の異なる時点から抽出した複数枚の代表フレームが
+渡されます。画像の直前に"=== clip_0 ==="のようなテキストマーカーがあり、
+そのマーカーの直後に続く画像群が1つのクリップに対応します。同じクリップの
+複数枚の画像を総合して判断してください(1枚だけではブランド名が見えない
+アングルのこともあるため)。
+
+商品情報(複数商品が記載されている場合がある)が与えられるので、各画像に写って
+いる商品がそのうちどれに最も一致するか判定してください。一致する商品が無い、
+または商品そのものが写っていない(手元や背景のみ等)場合は"unknown"としてください。
+
+また、そのカットがどんな見せ方をしているか(shot_type)を短く分類してください
+(例: パッケージ/キャップのクローズアップ、コンパクトを開く、テクスチャ・質感、
+手の甲や肌へのスウォッチ、使用シーン、など自由に簡潔な日本語で)。
+
+# 出力形式 (JSON厳守、他の文章は一切出力しない)
+{
+  "results": [
+    {"id": "clip_0", "product": "...", "shot_type": "...", "description": "一言説明"}
+  ]
+}
+"""
+
+PLAN_SYSTEM_PROMPT = """\
+あなたはTikTok Shop向け動画の企画・構成作家です。ナレーション無しの手元B-roll
+クリップ群(商品・見せ方が分類済み)と商品情報から、投稿動画の企画と構成を
+提案してください。
+
+# 企画 (concept)
+- 商品情報に記載された複数の魅力のうち、どれを軸に訴求するかを1行で決める。
+
+# 構成
+- フック (冒頭・未完了状態にする、または「まだ○○してる人」型の呼びかけ。数字は書かない)
+- 本文テロップ (2〜4個。商品の具体的な魅力→裏付けとなる処方・技術→仕上がりの
+  描写、の順に紹介する)
+- CTA (末尾。「詳細は左下の黄色ボタンをチェックしてね」の意味を必ず含める。数字は書かない)
+- 各テロップには、与えられたクリップの中から最も内容が合うものを1つ選び、
+  そのidを"clip_id"に指定すること。テロップの内容は、対応するクリップの
+  shot_type/descriptionと矛盾しないようにする(例: テクスチャを見せている
+  カットには使用感の話、パッケージのカットにはブランド名や特長の話)。
+  クリップは使い回してよいが、できるだけ多様なカットを使う。
+
+# 各テロップの表示秒数
+- "duration"(秒, 2.0〜4.0の範囲)を文字数に応じて指定する。
+
+# 禁止事項
+- 「価格の安さ」を訴求しない。誇張表現は使わない。
+- ブランド名・商品名は入力された商品情報の表記を一字一句正確に使う(省略・言い換え禁止)。
+- 存在しない効果の記載をしない。
+- 他社・競合商品への言及や比較をしない。
+- 薬機法・景品表示法に抵触しうる断定表現を避ける。
+
+# 文体
+- タメ口・標準語。「です/ます」は禁止。方言も禁止。
+
+# 出力形式 (JSON厳守、他の文章は一切出力しない)
+{
+  "concept": "...",
+  "items": [
+    {"clip_id": "clip_0", "text": "...", "duration": 2.3}
+  ],
+  "hashtags": ["...", "...", "..."]
+}
+itemsの最初の要素がフック、最後の要素がCTA、間が本文テロップ。
 """
 
 SYSTEM_PROMPT = """\
@@ -147,6 +215,65 @@ def call_gemini_highlight(segments, product_info):
     start_index = max(0, min(int(result["start_index"]), len(segments) - 1))
     end_index = max(start_index, min(int(result["end_index"]), len(segments) - 1))
     return start_index, end_index, result.get("reason", "")
+
+
+def call_gemini_classify(manifest_items, product_info):
+    from google.genai import types
+
+    client = _gemini_client()
+
+    parts = [json.dumps({"product_info": product_info,
+                          "clip_count": len(manifest_items)}, ensure_ascii=False)]
+    for i, item in enumerate(manifest_items):
+        parts.append(f"=== clip_{i} ===")
+        for frame in item["frames"]:
+            frame_path = Path(frame)
+            mime = "image/png" if frame_path.suffix.lower() == ".png" else "image/jpeg"
+            parts.append(types.Part.from_bytes(data=frame_path.read_bytes(), mime_type=mime))
+
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=parts,
+        config=types.GenerateContentConfig(
+            system_instruction=CLASSIFY_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            temperature=0.2,
+        ),
+    )
+
+    return json.loads(response.text)["results"]
+
+
+def call_gemini_plan(product_info, available_clips):
+    from google.genai import types
+
+    client = _gemini_client()
+
+    user_content = json.dumps(
+        {"available_clips": available_clips, "product_info": product_info},
+        ensure_ascii=False,
+    )
+
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=user_content,
+        config=types.GenerateContentConfig(
+            system_instruction=PLAN_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            temperature=0.7,
+        ),
+    )
+
+    return json.loads(response.text)
+
+
+def _extract_product_name(product_info):
+    for line in product_info.splitlines():
+        line = line.strip()
+        for prefix in ("商品名:", "商品名："):
+            if line.startswith(prefix):
+                return line[len(prefix):].strip()
+    return None
 
 
 def call_gemini_script(product_info):
@@ -249,15 +376,80 @@ def main_script():
     print(f"[edit_brain] 台本生成(ナレーション無し素材用) 合計{total:.1f}秒 -> {out_path}")
 
 
+def main_plan():
+    if len(sys.argv) != 5:
+        print("usage: edit_brain.py plan manifest.json product_info.txt plan.json",
+              file=sys.stderr)
+        sys.exit(1)
+
+    manifest_path, product_info_path, out_path = sys.argv[2:5]
+
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    with open(product_info_path, encoding="utf-8") as f:
+        product_info = f.read().strip()
+
+    classified = call_gemini_classify(manifest, product_info)
+
+    id_to_clip = {f"clip_{i}": item["clip"] for i, item in enumerate(manifest)}
+    for c in classified:
+        c["clip"] = id_to_clip.get(c["id"])
+
+    target_product = _extract_product_name(product_info)
+    if target_product:
+        matched = [c for c in classified if target_product in (c.get("product") or "")]
+    else:
+        matched = [c for c in classified if (c.get("product") or "unknown") != "unknown"]
+
+    if not matched:
+        print("商品情報に一致するクリップが見つかりませんでした。", file=sys.stderr)
+        print(f"分類結果: {json.dumps(classified, ensure_ascii=False)}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[edit_brain] {len(manifest)}クリップ中{len(matched)}本が商品に一致 "
+          f"(除外: {len(manifest) - len(matched)}本)")
+
+    plan = call_gemini_plan(product_info, matched)
+
+    id_to_item = {c["id"]: c for c in matched}
+    segments = []
+    t = 0.0
+    for entry in plan["items"]:
+        clip_info = id_to_item.get(entry["clip_id"])
+        if clip_info is None:
+            print(f"警告: 未知のclip_id '{entry['clip_id']}' を無視します。",
+                  file=sys.stderr)
+            continue
+        dur = max(0.5, float(entry["duration"]))
+        segments.append({"start": t, "end": t + dur, "text": entry["text"],
+                          "clip": clip_info["clip"]})
+        t += dur
+
+    out = {"concept": plan["concept"], "segments": segments,
+           "hashtags": plan["hashtags"]}
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+
+    print(f"[edit_brain] 企画: {plan['concept']} "
+          f"({len(segments)}カット・合計{t:.1f}秒) -> {out_path}")
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "script":
         main_script()
         return
 
+    if len(sys.argv) >= 2 and sys.argv[1] == "plan":
+        main_plan()
+        return
+
     if len(sys.argv) != 5:
         print("usage: edit_brain.py seg.json product_info.txt "
               "seg_ai.json highlight.json\n"
-              "       edit_brain.py script product_info.txt seg_ai.json",
+              "       edit_brain.py script product_info.txt seg_ai.json\n"
+              "       edit_brain.py plan manifest.json product_info.txt plan.json",
               file=sys.stderr)
         sys.exit(1)
 
