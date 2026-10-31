@@ -236,6 +236,13 @@ python3 lite_edit.py render assembled.mp4 subs.ass final.mp4
   確認。`make_video.py`経由（商品情報から自動でhotwordsを抽出して渡す）でも
   同様に機能することを、cut→transcribe→edit_brain→trim→caption→renderの
   一連を通しで確認した。
+- **既編集素材（レターボックス）の自動検知**: `lite_edit.py cut`実行時に
+  ffmpegの`cropdetect`で黒帯を自動検出し、既に編集済み（字幕・オーバーレイ
+  焼き込み済み）の可能性がある場合に警告を出すようにした。実際に黒帯が
+  焼き込まれていたTWC案件の素材（1080x1920の枠に対し映像本体が約1072x864）
+  で警告が正しく出ること、無編集の合成テスト素材では誤検知しないことを
+  確認済み。ただし黒帯の有無だけでの判定のため、黒帯の無い編集済み素材
+  （字幕だけ焼き込まれているもの等）は検知できない限界がある。
 - `cut` / `trim` / `transcribe` / `caption` / `render`（Phase1一連）、および
   `edit_brain.py`によるハイライト区間選定・Gemini API実呼び出しまで含め、
   クラウド開発環境で実際に動かしてエンドツーエンドで動作確認済み（合成音声の

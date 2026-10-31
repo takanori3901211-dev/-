@@ -63,7 +63,51 @@ def _speech_segments(duration, silences):
     return [tuple(s) for s in merged if s[1] - s[0] > 0.01]
 
 
+def _video_dims(path):
+    r = _run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+              "-show_entries", "stream=width,height",
+              "-of", "csv=p=0", str(path)])
+    w, h = r.stdout.strip().split(",")
+    return int(w), int(h)
+
+
+def _detect_letterbox(path, sample_seconds=5):
+    """ffmpegのcropdetectで、素材に黒帯(レターボックス)が無いか調べる。
+
+    黒帯が検出される場合、既に編集済み(字幕・オーバーレイ焼き込み済み)の
+    動画である可能性が高い(本ツールは生の未編集素材を前提としているため)。
+    戻り値は(crop_w, crop_h, orig_w, orig_h)。検出できなければNone。
+    """
+    orig_w, orig_h = _video_dims(path)
+    r = _run(["ffmpeg", "-i", str(path), "-t", str(sample_seconds),
+              "-vf", "cropdetect=24:16:0", "-f", "null", "-"])
+    matches = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", r.stderr)
+    if not matches:
+        return None
+    crop_w, crop_h, _x, _y = (int(v) for v in matches[-1])
+    return crop_w, crop_h, orig_w, orig_h
+
+
+def _warn_if_preedited(path):
+    detected = _detect_letterbox(path)
+    if detected is None:
+        return
+    crop_w, crop_h, orig_w, orig_h = detected
+    if crop_h / orig_h < 0.9 or crop_w / orig_w < 0.9:
+        print(
+            f"[警告] {path}: 黒帯(レターボックス)を検出しました "
+            f"(映像本体は約{crop_w}x{crop_h}、全体は{orig_w}x{orig_h})。"
+            "この素材は既に編集済み(字幕・オーバーレイ焼き込み済み)の可能性が"
+            "あります。本ツールは無編集の生素材を前提としているため、"
+            "そのまま使うと新しいテロップと既存の字幕が二重表示される"
+            "おそれがあります。素材の性質を確認してください。",
+            file=sys.stderr,
+        )
+
+
 def cmd_cut(args):
+    _warn_if_preedited(args.input)
+
     duration = _ffprobe_duration(args.input)
     silences = _detect_silence(args.input, args.threshold_db, args.min_silence)
     segments = _speech_segments(duration, silences)
