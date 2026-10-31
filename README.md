@@ -11,3 +11,9 @@
 
 `auto_edit_lite/edit_brain.py` には非公開のAI判断プロンプトが含まれる。
 素人ユーザーへの配布物には含めないこと（詳細は`HANDOFF.md`参照）。
+
+## その他のツール
+
+[`casting_research/`](./casting_research/) — X上で伸びている商品の切り抜きから
+タレント/インフルエンサーのキャスティング事例を収集・記録・集計するリサーチ
+ツール。詳細は[`casting_research/README.md`](./casting_research/README.md)参照。
