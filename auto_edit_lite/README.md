@@ -60,9 +60,24 @@ python3 lite_edit.py render cut.mp4 subs.ass final.mp4 --hook-freeze 2.3
 `HOOK_DURATION`、デフォルト2.3秒）を指定する。先頭をその秒数分だけ
 静止＋無音にして、テロップと映像の時間軸を同期させる。
 
+## 動作確認状況
+
+- `cut` / `transcribe` / `caption` / `render`（Phase1一連）はクラウド開発環境で
+  ffmpeg・faster-whisperを実際に動かして動作確認済み。ただし本物のTikTok Shop
+  素材・自宅Macの実環境（Apple Silicon等）では未検証。
+- `edit_brain.py`のGemini API呼び出しは未検証（APIキー未取得のため）。
+- faster-whisperが内部で使うPyAV(`av`パッケージ)はバージョンによっては
+  `model.transcribe()`実行時に`TypeError: open() got an unexpected keyword
+  argument 'metadata_errors'`のようなエラーで落ちることがある。本ツールは
+  ffmpeg CLIで直接PCMにデコードしてnumpy配列を渡すことでPyAVの内部デコードを
+  回避する実装にしてあるため、通常は影響を受けない。もし同様のエラーが出た
+  場合は`pip3 show av`でバージョンを確認すること。
+
 ## 既知の制約
 
-- この開発環境ではffmpeg/faster-whisperの実機動作検証は未実施
-  （`python3 -m py_compile` による構文チェックまでしか行っていない回がある）。
-  実際の動作確認は自宅Mac側で行うこと。
 - 話者分けは未対応（単一話者前提）。
+- 無音区間が無く非常に長い1セグメントになった場合、テロップが縦に5行以上
+  など極端に長くなることがある（セーフゾーン下部からはみ出す可能性）。
+  現状は句読点/スペース際での折り返しのみで、行数の上限や文字起こし
+  セグメントの強制分割は行っていない。
+- 本物のTikTok Shop素材・自宅Macの実環境では未検証。

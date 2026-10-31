@@ -79,22 +79,44 @@ def cmd_cut(args):
     with open(list_path, "w") as f:
         for i, (start, end) in enumerate(segments):
             part = tmpdir / f"part_{i:04d}.mp4"
+            # 短い区間だと直前のキーフレームしか無く -c copy で動画トラックが
+            # 丸ごと欠落することがあるため、各区間は再エンコードして切り出す。
             _run(["ffmpeg", "-y", "-i", str(args.input), "-ss", str(start),
-                  "-to", str(end), "-c", "copy", str(part)])
+                  "-to", str(end), "-c:v", "libx264", "-preset", "fast",
+                  "-c:a", "aac", str(part)])
             f.write(f"file '{part.resolve()}'\n")
 
     _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
-          "-c", "copy", str(args.output)])
+          "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(args.output)])
 
     print(f"[cut] {len(segments)}個の発話区間を結合 -> {args.output}")
+
+
+def _decode_audio_16k_mono(path):
+    """ffmpegで直接PCMにデコードしてnumpy配列で返す。
+
+    faster-whisperの内部デコード(PyAV)はインストールされたPyAVの
+    バージョンによってAPIが変わり落ちることがあるため、ここでは
+    ffmpeg CLIで直接デコードしてPyAVを経由しない。
+    """
+    import numpy as np
+
+    cmd = ["ffmpeg", "-i", str(path), "-f", "s16le", "-ac", "1",
+           "-ar", "16000", "-v", "error", "-"]
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.decode(errors="ignore"))
+    return np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 def cmd_transcribe(args):
     from faster_whisper import WhisperModel
 
+    audio = _decode_audio_16k_mono(args.input)
+
     model = WhisperModel("small", device="cpu", compute_type="int8")
     segments_iter, _info = model.transcribe(
-        str(args.input), language="ja", vad_filter=True)
+        audio, language="ja", vad_filter=True)
 
     segments = [
         {"start": s.start, "end": s.end, "text": s.text.strip()}
@@ -107,27 +129,37 @@ def cmd_transcribe(args):
     print(f"[transcribe] {len(segments)}セグメント -> {args.output}")
 
 
-def _wrap(text, max_chars=14):
-    """句読点・スペース付近で2行に折る簡易ロジック。"""
-    text = text.strip()
-    if len(text) <= max_chars:
-        return text
+_BREAK_CHARS = "、。！？ "
 
-    mid = len(text) // 2
-    break_chars = "、。！？ "
+
+def _split_once(text, max_chars):
+    """textの先頭からmax_chars付近で1回だけ句読点/スペース際で切る。"""
+    if len(text) <= max_chars:
+        return text, ""
+
     best = None
-    for offset in range(0, mid + 1):
-        for pos in (mid - offset, mid + offset):
-            if 0 < pos < len(text) and text[pos - 1] in break_chars:
-                best = pos
-                break
-        if best:
+    for offset in range(0, max_chars + 1):
+        pos = max_chars - offset
+        if 0 < pos < len(text) and text[pos - 1] in _BREAK_CHARS:
+            best = pos
             break
 
     if best is None:
-        best = mid
+        best = max_chars
 
-    return text[:best] + r"\N" + text[best:]
+    return text[:best], text[best:]
+
+
+def _wrap(text, max_chars=14):
+    """画面幅に収まるよう、必要な行数分だけ句読点/スペース際で折り返す。"""
+    text = text.strip()
+    lines = []
+    remaining = text
+    while remaining:
+        line, remaining = _split_once(remaining, max_chars)
+        lines.append(line)
+
+    return r"\N".join(lines)
 
 
 def _ass_time(seconds):
