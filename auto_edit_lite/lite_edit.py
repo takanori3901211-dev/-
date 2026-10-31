@@ -272,8 +272,11 @@ def cmd_transcribe(args):
     audio = _decode_audio_16k_mono(args.input)
 
     model = WhisperModel("small", device="cpu", compute_type="int8")
+    kwargs = {}
+    if getattr(args, "hotwords", None):
+        kwargs["hotwords"] = args.hotwords
     segments_iter, _info = model.transcribe(
-        audio, language="ja", vad_filter=True)
+        audio, language="ja", vad_filter=True, **kwargs)
 
     segments = [
         {"start": s.start, "end": s.end, "text": s.text.strip()}
@@ -449,6 +452,9 @@ def build_parser():
     sp = sub.add_parser("transcribe", help="文字起こし")
     sp.add_argument("input")
     sp.add_argument("output")
+    sp.add_argument("--hotwords", default=None,
+                     help="ブランド名・商品名など誤認識させたくない固有名詞を"
+                          "スペース区切りで渡す(faster-whisperのhotwordsに渡る)")
     sp.set_defaults(func=cmd_transcribe)
 
     sp = sub.add_parser("caption", help="字幕(ASS)生成")

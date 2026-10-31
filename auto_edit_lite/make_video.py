@@ -16,6 +16,7 @@ GEMINI_API_KEY環境変数が必須。
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -35,12 +36,35 @@ def run(cmd):
         sys.exit(r.returncode)
 
 
+def _extract_hotwords(product_info_text):
+    """商品情報から、文字起こしで誤認識されやすい固有名詞(ブランド名・商品名)
+    をfaster-whisperのhotwordsヒント用に抜き出す。"""
+    words = []
+    for line in product_info_text.splitlines():
+        line = line.strip()
+        for prefix in ("商品名:", "商品名：", "ブランド名:", "ブランド名："):
+            if line.startswith(prefix):
+                words.append(line[len(prefix):].strip())
+    # 英大文字中心の単語(ブランド名・商品名の英語表記)も拾う
+    words += re.findall(r"\b[A-Z][A-Z0-9]{2,}\b", product_info_text)
+    seen = []
+    for w in words:
+        if w and w not in seen:
+            seen.append(w)
+    return " ".join(seen)
+
+
 def make_from_long_video(product_info, src, outdir):
     cut = outdir / "cut.mp4"
     seg = outdir / "seg.json"
 
+    hotwords = _extract_hotwords(Path(product_info).read_text(encoding="utf-8"))
+
     run(["python3", LITE_EDIT, "cut", src, cut])
-    run(["python3", LITE_EDIT, "transcribe", cut, seg])
+    transcribe_cmd = ["python3", LITE_EDIT, "transcribe", cut, seg]
+    if hotwords:
+        transcribe_cmd += ["--hotwords", hotwords]
+    run(transcribe_cmd)
 
     segments = json.loads(seg.read_text(encoding="utf-8"))["segments"]
     if not segments:

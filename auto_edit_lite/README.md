@@ -229,6 +229,13 @@ python3 lite_edit.py render assembled.mp4 subs.ass final.mp4
   正しく映していること、テロップと映像の内容が一致していることを画像で
   確認した。小規模テストだけでなく、ある程度まとまった本数の実素材でも
   同じ精度で動くことを確認できた点が今回の成果。
+- **固有名詞の誤認識対策（`--hotwords`）**: 実際に発生していた「FORENCOS」が
+  「ボレンコス」と誤認識される事例（別の実素材、TWC/FORENCOS案件のコンシーラー
+  動画）で検証した。`lite_edit.py transcribe --hotwords "FORENCOS"`を指定
+  することで、動画中の全箇所（3回登場）で正しく「FORENCOS」と認識されることを
+  確認。`make_video.py`経由（商品情報から自動でhotwordsを抽出して渡す）でも
+  同様に機能することを、cut→transcribe→edit_brain→trim→caption→renderの
+  一連を通しで確認した。
 - `cut` / `trim` / `transcribe` / `caption` / `render`（Phase1一連）、および
   `edit_brain.py`によるハイライト区間選定・Gemini API実呼び出しまで含め、
   クラウド開発環境で実際に動かしてエンドツーエンドで動作確認済み（合成音声の
