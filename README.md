@@ -7,6 +7,11 @@
 （セットアップ: [`auto_edit_lite/README.md`](./auto_edit_lite/README.md)、
 仕様: [`auto_edit_lite/仕様書.md`](./auto_edit_lite/仕様書.md)）。
 
+Phase3（Google Drive連携のクラウド完全自動化）の設計・準備コードは
+[`auto_edit_lite/phase3/`](./auto_edit_lite/phase3/) にある。GCPアクセスが
+無い環境で作成したため、実際のデプロイ・動作検証はまだ行っていない
+（詳細は `auto_edit_lite/phase3/README.md` 参照）。
+
 ## 重要
 
 `auto_edit_lite/edit_brain.py` には非公開のAI判断プロンプトが含まれる。
