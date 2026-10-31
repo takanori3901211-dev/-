@@ -138,6 +138,49 @@ PLAN_SYSTEM_PROMPT = """\
 itemsの最初の要素がフック、最後の要素がCTA、間が本文テロップ。
 """
 
+SHOTLIST_SYSTEM_PROMPT = """\
+あなたはTikTok Shop向け動画の企画・ディレクターです。商品情報のみから、
+これから撮影する「カット割（撮影指示書）」を作成してください。素材はまだ
+存在せず、撮影未経験のスタッフがこれを読んで迷わず撮影できる具体性が必要です。
+
+# 企画 (concept)
+- 商品情報に記載された複数の魅力のうち、どれを軸に訴求するかを1行で決める。
+
+# カット構成
+- フック用カットを1つ(冒頭)
+- 本文用カットを2〜4つ(商品の魅力→裏付けとなる処方・技術→仕上がりの描写、の順)
+- CTA用カットを1つ(末尾)
+
+各カットについて以下を決める:
+- "caption": そのカットに乗せるテロップ文言。数字は書かない。タメ口・標準語
+  (「です/ます」禁止、方言禁止)。フックは未完了状態か「まだ○○してる人」型の
+  呼びかけ。CTAは「詳細は左下の黄色ボタンをチェックしてね」の意味を含める。
+  「価格の安さ」を訴求しない、誇張表現を使わない、ブランド名・商品名は
+  商品情報の表記を一字一句正確に使う、存在しない効果を書かない、競合への
+  言及・比較をしない、薬機法・景品表示法に抵触しうる断定表現を避ける。
+- "duration": 表示秒数(2.0〜4.0秒、文字数に応じて)。
+- "shot_description": 何をどう撮るか、日本語で簡潔かつ具体的に指示する
+  (例:「商品パッケージを正面からかざして見せる」「フタを開けて中身を見せる」
+  「手の甲に少量出してテクスチャを見せる」など)。テロップの内容と矛盾しない
+  画(え)にすること。
+- "composition_prompt": 画角・構図・ライティングの雰囲気を表す英語の画像生成
+  プロンプト。アングル(例: overhead, 45-degree, close-up)、画面構成、背景、
+  光の当たり方を指定すること。実在のブランド名・ロゴ・パッケージの正確な
+  形状や文字は一切書かないこと(参考画像は構図の例であり、実商品の外観を
+  再現するものではないため)。
+
+# 出力形式 (JSON厳守、他の文章は一切出力しない)
+{
+  "concept": "...",
+  "shots": [
+    {"caption": "...", "duration": 2.3, "shot_description": "...",
+     "composition_prompt": "..."}
+  ],
+  "hashtags": ["...", "...", "..."]
+}
+shotsの最初の要素がフック、最後の要素がCTA、間が本文テロップ。
+"""
+
 SYSTEM_PROMPT = """\
 あなたはTikTok Shop動画の構成作家です。入力された発話の文字起こしと商品情報から、
 以下のルールに厳密に従って編集方針をJSONで出力してください。
@@ -276,6 +319,47 @@ def _extract_product_name(product_info):
     return None
 
 
+IMAGE_MODEL = "gemini-3.1-flash-image"
+IMAGE_STYLE_SUFFIX = (
+    ", clean minimal background, soft natural lighting, vertical 9:16 "
+    "composition, no visible text, no logos, no brand names, generic "
+    "product-mockup photo for composition reference only"
+)
+
+
+def call_gemini_image(composition_prompt):
+    client = _gemini_client()
+
+    response = client.models.generate_content(
+        model=IMAGE_MODEL,
+        contents=composition_prompt + IMAGE_STYLE_SUFFIX,
+    )
+
+    for part in response.candidates[0].content.parts:
+        if part.inline_data:
+            return part.inline_data.data
+
+    return None
+
+
+def call_gemini_shotlist(product_info):
+    from google.genai import types
+
+    client = _gemini_client()
+
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=json.dumps({"product_info": product_info}, ensure_ascii=False),
+        config=types.GenerateContentConfig(
+            system_instruction=SHOTLIST_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            temperature=0.7,
+        ),
+    )
+
+    return json.loads(response.text)
+
+
 def call_gemini_script(product_info):
     from google.genai import types
 
@@ -353,6 +437,117 @@ def build_seg_ai(segments, plan):
     }
 
     return {"segments": [hook_seg] + shifted + [cta_seg], "hashtags": plan["hashtags"]}
+
+
+IMAGES_PER_SHOT = 2
+SHOT_LABELS = ("フック", "本文", "CTA")
+
+
+def _shot_label(index, total):
+    if index == 0:
+        return "フック"
+    if index == total - 1:
+        return "CTA"
+    return f"本文{index}"
+
+
+def _render_shotlist_html(concept, shots, hashtags):
+    import base64
+
+    rows = []
+    for i, shot in enumerate(shots):
+        images_html = "".join(
+            f'<img src="data:image/png;base64,{base64.b64encode(img).decode()}" '
+            f'class="ref-img" alt="参考イメージ{j+1}">'
+            for j, img in enumerate(shot.get("images", []))
+            if img is not None
+        )
+        rows.append(f"""
+        <section class="shot">
+          <h2>カット{i + 1}（{_shot_label(i, len(shots))}） ー 目安{shot['duration']:.1f}秒</h2>
+          <p class="desc"><strong>撮る内容:</strong> {shot['shot_description']}</p>
+          <p class="caption"><strong>テロップ:</strong> 「{shot['caption']}」</p>
+          <div class="refs">{images_html}</div>
+          <p class="note">※参考イメージは構図・アングルの例です。実際の商品で撮影してください。</p>
+        </section>
+        """)
+
+    hashtags_html = " ".join(f"#{h}" for h in hashtags)
+
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>撮影指示書</title>
+<style>
+  body {{ font-family: -apple-system, 'Hiragino Sans', sans-serif; max-width: 720px;
+         margin: 0 auto; padding: 24px; background: #faf9f7; color: #222; }}
+  h1 {{ font-size: 1.4em; }}
+  .concept {{ background: #fff3cd; padding: 12px 16px; border-radius: 8px; }}
+  .shot {{ background: #fff; border-radius: 12px; padding: 16px; margin: 20px 0;
+           box-shadow: 0 1px 4px rgba(0,0,0,0.1); }}
+  .shot h2 {{ font-size: 1.1em; margin-top: 0; }}
+  .caption {{ color: #c0392b; }}
+  .refs {{ display: flex; gap: 8px; flex-wrap: wrap; }}
+  .ref-img {{ width: 160px; border-radius: 8px; border: 1px solid #ddd; }}
+  .note {{ font-size: 0.85em; color: #888; }}
+  .hashtags {{ color: #555; margin-top: 24px; }}
+</style>
+</head>
+<body>
+<h1>撮影指示書</h1>
+<p class="concept"><strong>企画:</strong> {concept}</p>
+{"".join(rows)}
+<p class="hashtags">{hashtags_html}</p>
+</body>
+</html>
+"""
+
+
+def main_shotlist():
+    if len(sys.argv) != 4:
+        print("usage: edit_brain.py shotlist product_info.txt outdir",
+              file=sys.stderr)
+        sys.exit(1)
+
+    product_info_path, outdir_path = sys.argv[2:4]
+    outdir = Path(outdir_path)
+    images_dir = outdir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(product_info_path, encoding="utf-8") as f:
+        product_info = f.read().strip()
+
+    plan = call_gemini_shotlist(product_info)
+    shots = plan["shots"]
+
+    for i, shot in enumerate(shots):
+        images = []
+        for j in range(IMAGES_PER_SHOT):
+            img = call_gemini_image(shot["composition_prompt"])
+            if img is not None:
+                (images_dir / f"shot{i + 1}_{j + 1}.png").write_bytes(img)
+            images.append(img)
+        shot["images"] = images
+        shot["image_files"] = [
+            f"images/shot{i + 1}_{j + 1}.png" for j in range(IMAGES_PER_SHOT)
+        ]
+        print(f"[edit_brain] カット{i + 1} 参考イメージ{len(images)}枚生成")
+
+    shotlist_json = {
+        "concept": plan["concept"],
+        "shots": [{k: v for k, v in s.items() if k != "images"} for s in shots],
+        "hashtags": plan["hashtags"],
+    }
+    with open(outdir / "shotlist.json", "w", encoding="utf-8") as f:
+        json.dump(shotlist_json, f, ensure_ascii=False, indent=2)
+
+    html = _render_shotlist_html(plan["concept"], shots, plan["hashtags"])
+    html_path = outdir / "撮影指示書.html"
+    html_path.write_text(html, encoding="utf-8")
+
+    print(f"[edit_brain] 企画: {plan['concept']} "
+          f"({len(shots)}カット) -> {outdir / 'shotlist.json'}, {html_path}")
 
 
 def main_script():
@@ -445,11 +640,16 @@ def main():
         main_plan()
         return
 
+    if len(sys.argv) >= 2 and sys.argv[1] == "shotlist":
+        main_shotlist()
+        return
+
     if len(sys.argv) != 5:
         print("usage: edit_brain.py seg.json product_info.txt "
               "seg_ai.json highlight.json\n"
               "       edit_brain.py script product_info.txt seg_ai.json\n"
-              "       edit_brain.py plan manifest.json product_info.txt plan.json",
+              "       edit_brain.py plan manifest.json product_info.txt plan.json\n"
+              "       edit_brain.py shotlist product_info.txt outdir",
               file=sys.stderr)
         sys.exit(1)
 
