@@ -75,6 +75,39 @@ python3 lite_edit.py render clip.mp4 subs.ass final.mp4 --hook-freeze 2.3 --cta-
 区間選定を使わず、素材全体をそのまま編集したい場合（素材が既に短尺の場合など）は
 `trim`を省略し、`caption`/`render`に`cut.mp4`をそのまま渡せばよい。
 
+### ナレーション無しのB-roll素材から作る場合（台本モード）
+
+「手元動画素材」のように、商品を手に取る・使用するクローズアップのみで
+**ナレーションが無い**素材（`transcribe`しても0セグメントになる）の場合は、
+発話内容から整文する通常モードが使えない。代わりに商品情報だけから
+Geminiに台本（フック/本文テロップ/CTA）をゼロから書かせ、複数のB-rollクリップを
+結合した映像に重ねる。
+
+```bash
+python3 edit_brain.py script product_info.txt seg_ai.json
+python3 lite_edit.py broll broll.mp4 --target-duration 16.0 --clips clip1.mp4 clip2.mp4 ...
+python3 lite_edit.py caption seg_ai.json subs.ass
+python3 lite_edit.py render broll.mp4 subs.ass final.mp4
+```
+
+- `edit_brain.py script`は商品情報のみから、各テロップの表示秒数(`duration`)
+  付きの台本を生成する（`--hook-freeze`/`--cta-freeze`は不要。B-roll映像が
+  連続して流れるため、静止による時間稼ぎが要らない）。
+- `lite_edit.py broll`は複数のB-rollクリップを`--target-duration`秒に
+  なるよう結合する。各クリップの実尺を上限に、短いクリップで埋まらなかった
+  分は他の（特に長い）クリップに自動で再配分する。
+
+**重要: 渡すクリップは全て同一商品のものであることを必ず確認すること。**
+TIRTIRの「大量動画素材_切り抜き用」フォルダ（35クリップ）で検証した際、
+同じフォルダ内に **複数の商品（MASK FIT RUBY MESH CUSHION / REFLECT GLOW
+PREP PRIMER / MASK FIT TONE UP ESSENCE 等）のB-rollが混在**しており、
+商品を確認せずに先頭から数クリップを機械的に選んだところ、テロップで
+紹介している商品と映像に映っている商品が異なる動画になってしまった
+（商品名・ブランド名の誤表示はNG事項として明示的に禁止されている）。
+本ツールはクリップの中身（商品）を自動判定する機能を持たないため、
+`broll`に渡す前に目視（またはGemini Visionなどを使った分類処理の追加実装）で
+商品が一致しているか必ず確認すること。
+
 ## 動作確認状況
 
 - `cut` / `trim` / `transcribe` / `caption` / `render`（Phase1一連）、および
@@ -91,6 +124,16 @@ python3 lite_edit.py render clip.mp4 subs.ass final.mp4 --hook-freeze 2.3 --cta-
   動画**だったため、本ツールが追加するテロップと二重表示になる問題が
   あった。切り抜き元として使う素材が無編集のraw footageか、既存の編集済み
   動画かによって対応が変わるため、本番運用前に素材の性質を確認すること。
+- 台本モード（`edit_brain.py script` + `lite_edit.py broll`）は、TIRTIRの
+  ナレーション無しB-roll素材（Google Driveの`TIRTIR手元動画素材`フォルダ、
+  35クリップ）で実際のGemini APIキーを使ってエンドツーエンドで動作確認済み。
+  商品情報（オリエンシートから取得）をもとに生成した台本と、商品が一致する
+  2クリップ（ルビー色のキャップ・黒いコンパクト、いずれもMASK FIT RUBY MESH
+  CUSHION）を結合した映像で、フック・本文・CTAが正しく画面に収まって
+  表示されることを画像で確認済み。ただし前述のとおり、フォルダ内の他クリップ
+  には異なる商品（PRIMER・TONE UP ESSENCE等）が混在しており、クリップ選定を
+  誤ると商品不一致の動画になることが実際に起きたため、`broll`に渡すクリップは
+  事前に目視確認が必須。
 - Gemini側のモデルは`gemini-2.5-flash`が新規ユーザー向けには廃止されていた
   ため、`gemini-3.8-flash`に変更済み（2026年時点の最新モデル名。将来的に
   また変わる可能性があるため、エラーが出た場合は`edit_brain.py`の

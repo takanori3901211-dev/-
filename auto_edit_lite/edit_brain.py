@@ -37,6 +37,39 @@ HIGHLIGHT_SYSTEM_PROMPT = """\
 start_index/end_indexは入力されたsegments配列のインデックスで、両端を含む範囲。
 """
 
+SCRIPT_SYSTEM_PROMPT = """\
+あなたはTikTok Shop向け動画の構成作家です。入力は商品情報のみで、素材映像は
+ナレーション無しの手元B-roll(商品を手に取る・使用するクローズアップ映像)です。
+テロップだけで完結する台本を商品情報から新規に作成してください。
+
+# 全体構成
+- フック (冒頭・未完了状態にする、または「まだ○○してる人」型の呼びかけ。数字は書かない)
+- 本文テロップ (2〜4個。商品の具体的な魅力→裏付けとなる処方・技術→仕上がりの
+  描写、の順に紹介する)
+- CTA (末尾。「詳細は左下の黄色ボタンをチェックしてね」の意味を必ず含める。数字は書かない)
+
+# 各テロップの表示秒数
+- フック/本文/CTAそれぞれに"duration"(秒, 2.0〜4.0の範囲)を文字数に応じて指定する。
+
+# 禁止事項
+- 「価格の安さ」を訴求しない。誇張表現は使わない。
+- ブランド名・商品名は入力された商品情報の表記を一字一句正確に使う(省略・言い換え禁止)。
+- 存在しない効果の記載をしない。
+- 他社・競合商品への言及や比較をしない。
+- 薬機法・景品表示法に抵触しうる断定表現を避ける。
+
+# 文体
+- タメ口・標準語。「です/ます」は禁止。方言も禁止。
+
+# 出力形式 (JSON厳守、他の文章は一切出力しない)
+{
+  "hook": {"text": "...", "duration": 2.3},
+  "captions": [{"text": "...", "duration": 3.0}],
+  "cta": {"text": "...", "duration": 2.3},
+  "hashtags": ["...", "...", "..."]
+}
+"""
+
 SYSTEM_PROMPT = """\
 あなたはTikTok Shop動画の構成作家です。入力された発話の文字起こしと商品情報から、
 以下のルールに厳密に従って編集方針をJSONで出力してください。
@@ -116,6 +149,35 @@ def call_gemini_highlight(segments, product_info):
     return start_index, end_index, result.get("reason", "")
 
 
+def call_gemini_script(product_info):
+    from google.genai import types
+
+    client = _gemini_client()
+
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=json.dumps({"product_info": product_info}, ensure_ascii=False),
+        config=types.GenerateContentConfig(
+            system_instruction=SCRIPT_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            temperature=0.7,
+        ),
+    )
+
+    return json.loads(response.text)
+
+
+def build_seg_from_script(plan):
+    segments = []
+    t = 0.0
+    for item in [plan["hook"]] + plan["captions"] + [plan["cta"]]:
+        dur = max(0.5, float(item["duration"]))
+        segments.append({"start": t, "end": t + dur, "text": item["text"]})
+        t += dur
+
+    return {"segments": segments, "hashtags": plan["hashtags"]}
+
+
 def call_gemini(segments, product_info):
     from google.genai import types
 
@@ -166,10 +228,37 @@ def build_seg_ai(segments, plan):
     return {"segments": [hook_seg] + shifted + [cta_seg], "hashtags": plan["hashtags"]}
 
 
+def main_script():
+    if len(sys.argv) != 4:
+        print("usage: edit_brain.py script product_info.txt seg_ai.json",
+              file=sys.stderr)
+        sys.exit(1)
+
+    product_info_path, out_path = sys.argv[2:4]
+
+    with open(product_info_path, encoding="utf-8") as f:
+        product_info = f.read().strip()
+
+    plan = call_gemini_script(product_info)
+    seg_ai = build_seg_from_script(plan)
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(seg_ai, f, ensure_ascii=False, indent=2)
+
+    total = seg_ai["segments"][-1]["end"]
+    print(f"[edit_brain] 台本生成(ナレーション無し素材用) 合計{total:.1f}秒 -> {out_path}")
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "script":
+        main_script()
+        return
+
     if len(sys.argv) != 5:
         print("usage: edit_brain.py seg.json product_info.txt "
-              "seg_ai.json highlight.json", file=sys.stderr)
+              "seg_ai.json highlight.json\n"
+              "       edit_brain.py script product_info.txt seg_ai.json",
+              file=sys.stderr)
         sys.exit(1)
 
     seg_path, product_info_path, out_path, highlight_path = sys.argv[1:5]

@@ -104,6 +104,71 @@ def cmd_trim(args):
     print(f"[trim] {start:.1f}s-{end:.1f}s -> {args.output}")
 
 
+def _allocate_durations(target_total, available):
+    """targetを人数分で均等割りし、短いクリップの余りを他のクリップに
+    再配分する(water-filling)。availableは各クリップの実尺のリスト。"""
+    n = len(available)
+    allocated = [0.0] * n
+    remaining_total = target_total
+    active = set(range(n))
+
+    while active and remaining_total > 1e-6:
+        share = remaining_total / len(active)
+        progressed = False
+        for i in list(active):
+            room = available[i] - allocated[i]
+            if room <= share + 1e-6:
+                allocated[i] += room
+                remaining_total -= room
+                active.discard(i)
+                progressed = True
+        if not progressed:
+            for i in active:
+                allocated[i] += share
+            remaining_total = 0.0
+            break
+
+    return allocated
+
+
+def cmd_broll(args):
+    """ナレーション無しのB-rollクリップ群を、目標秒数分だけ結合する。
+
+    各クリップの実尺を上限に、短いクリップで埋まらなかった分は他のクリップ
+    (特に長いクリップ)に再配分して、できるだけ目標秒数に近づける。
+    """
+    clips = list(args.clips)
+    if not clips:
+        print("B-rollクリップが指定されていません。", file=sys.stderr)
+        sys.exit(1)
+
+    available = [_ffprobe_duration(c) for c in clips]
+    allocated = _allocate_durations(args.target_duration, available)
+
+    tmpdir = Path(args.output).parent / f".{Path(args.output).stem}_broll_parts"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    list_path = tmpdir / "concat.txt"
+
+    vf = (f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=increase,"
+          f"crop={VIDEO_W}:{VIDEO_H},setsar=1")
+
+    with open(list_path, "w") as f:
+        for i, (clip, dur) in enumerate(zip(clips, allocated)):
+            if dur <= 0.05:
+                continue
+            part = tmpdir / f"part_{i:04d}.mp4"
+            _run(["ffmpeg", "-y", "-i", str(clip), "-t", str(dur),
+                  "-vf", vf, "-c:v", "libx264", "-preset", "fast",
+                  "-c:a", "aac", "-ar", "44100", "-ac", "1", str(part)])
+            f.write(f"file '{part.resolve()}'\n")
+
+    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+          "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", str(args.output)])
+
+    total = sum(allocated)
+    print(f"[broll] {len(clips)}クリップを結合(合計{total:.1f}秒) -> {args.output}")
+
+
 def _decode_audio_16k_mono(path):
     """ffmpegで直接PCMにデコードしてnumpy配列で返す。
 
@@ -284,6 +349,12 @@ def build_parser():
     sp.add_argument("highlight")
     sp.add_argument("output")
     sp.set_defaults(func=cmd_trim)
+
+    sp = sub.add_parser("broll", help="ナレーション無しB-rollクリップ群を目標秒数で結合")
+    sp.add_argument("output")
+    sp.add_argument("--target-duration", type=float, required=True)
+    sp.add_argument("--clips", nargs="+", required=True)
+    sp.set_defaults(func=cmd_broll)
 
     sp = sub.add_parser("transcribe", help="文字起こし")
     sp.add_argument("input")
