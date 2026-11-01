@@ -24,8 +24,9 @@ Notta自体には開発者向けの公開API/Webhookが無い（後述）ため�
 ⑤ Claude API（claude-opus-5-5）で議事録（Markdown）とタスクリスト
    （担当者・タスク・期限のJSON）を生成
        ↓
-⑥ 文字起こし本文・議事録をGoogle Driveの指定フォルダにGoogle Docsとして保存
-   タスクリストはタスク管理用の単一Google Sheetsに行として追記
+⑥ 議事録＋文字起こし全文を1つのGoogle Docsにまとめて、Google Driveの
+   指定フォルダに保存。タスクリストはタスク管理用の単一Google Sheetsに
+   行として追記
        ↓
 ⑦ Gmailで議事録・タスクシートへのリンクを通知
        ↓

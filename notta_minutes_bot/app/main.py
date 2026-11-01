@@ -59,14 +59,17 @@ def _process_page(page: dict, page_id: str) -> None:
     minutes_markdown = generated["minutes_markdown"]
     tasks = generated["tasks"]
 
+    combined_markdown = (
+        f"{minutes_markdown}\n\n---\n\n## 文字起こし全文\n\n{transcript_text}"
+    )
+
     today = datetime.date.today().isoformat()
-    drive_store.save_text_as_google_doc(f"{today}_{title}_文字起こし", transcript_text)
-    minutes_doc_id = drive_store.save_text_as_google_doc(f"{today}_{title}_議事録", minutes_markdown)
+    doc_id = drive_store.save_text_as_google_doc(f"{today}_{title}", combined_markdown)
     drive_store.append_tasks(title, tasks)
 
     notifier.send_minutes_notification(
         meeting_title=title,
-        doc_url=drive_store.doc_url(minutes_doc_id),
+        doc_url=drive_store.doc_url(doc_id),
         task_sheet_url=drive_store.task_sheet_url(),
         task_count=len(tasks),
     )
