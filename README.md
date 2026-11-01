@@ -16,3 +16,9 @@ Phase3（Google Drive連携のクラウド完全自動化）の設計・準備�
 
 `auto_edit_lite/edit_brain.py` には非公開のAI判断プロンプトが含まれる。
 素人ユーザーへの配布物には含めないこと（詳細は`HANDOFF.md`参照）。
+
+## Notta議事録・タスクリスト自動生成
+
+Nottaの文字起こし完了をWebhookで受け取り、Claude APIで議事録・タスクリスト
+を生成してGoogle Driveに保存するパイプライン。[`notta_minutes_bot/`](./notta_minutes_bot/)
+を参照（セットアップ手順・未決事項は同ディレクトリの`README.md`に記載）。
