@@ -2,9 +2,10 @@ import os
 
 
 class Config:
-    NOTTA_API_KEY = os.environ.get("NOTTA_API_KEY", "")
-    NOTTA_API_BASE_URL = os.environ.get("NOTTA_API_BASE_URL", "https://api.notta.ai/v1")
-    NOTTA_WEBHOOK_SECRET = os.environ.get("NOTTA_WEBHOOK_SECRET", "")
+    # Notion（Nottaから手動エクスポートした文字起こしを溜めるデータベース）
+    NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "")
+    NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
+    NOTION_PROCESSED_PROPERTY = os.environ.get("NOTION_PROCESSED_PROPERTY", "処理済み")
 
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
     ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5-5")
@@ -22,4 +23,6 @@ class Config:
     GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
     NOTIFY_EMAIL_TO = os.environ.get("NOTIFY_EMAIL_TO", "")
 
-    INBOUND_WEBHOOK_SHARED_SECRET = os.environ.get("INBOUND_WEBHOOK_SHARED_SECRET", "")
+    # /poll エンドポイント（Cloud Scheduler等からの定期呼び出し）を簡易に
+    # 保護するための共有シークレット（任意）
+    POLL_SHARED_SECRET = os.environ.get("POLL_SHARED_SECRET", "")

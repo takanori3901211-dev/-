@@ -3,7 +3,7 @@ import logging
 
 from flask import Flask, jsonify, request
 
-from . import drive_store, minutes_generator, notifier, notta_client
+from . import drive_store, minutes_generator, notifier, notion_client
 from .config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -17,53 +17,59 @@ def healthz():
     return jsonify({"status": "ok"})
 
 
-@app.post("/webhook/notta")
-def notta_webhook():
-    if Config.INBOUND_WEBHOOK_SHARED_SECRET:
-        if request.args.get("secret") != Config.INBOUND_WEBHOOK_SHARED_SECRET:
+@app.post("/poll")
+def poll_notion():
+    """Notionの文字起こしデータベースを確認し、未処理ページを処理する。
+
+    Cloud Schedulerなどから定期的に呼び出す想定（例: 15分おき）。
+    """
+    if Config.POLL_SHARED_SECRET:
+        if request.args.get("secret") != Config.POLL_SHARED_SECRET:
             return jsonify({"error": "unauthorized"}), 401
 
-    payload = request.get_json(silent=True) or {}
-    logger.info("Notta webhook受信: %s", payload)
-
-    transcription_id = notta_client.extract_transcription_id(payload)
-    if not transcription_id:
-        logger.warning("ペイロードから文字起こしIDを特定できませんでした: %s", payload)
-        return jsonify({"error": "transcription_id not found in payload"}), 400
-
     try:
-        result = notta_client.fetch_transcription_result(transcription_id)
-        transcript_text = result.get("text") or result.get("transcript") or ""
-        meta = {
-            "title": result.get("title"),
-            "created_at": result.get("created_at"),
-        }
-
-        generated = minutes_generator.generate_minutes(transcript_text, meta)
-        minutes_markdown = generated["minutes_markdown"]
-        tasks = generated["tasks"]
-
-        today = datetime.date.today().isoformat()
-        base_name = meta.get("title") or transcription_id
-        drive_store.save_text_as_google_doc(
-            f"{today}_{base_name}_文字起こし", transcript_text
-        )
-        minutes_doc_id = drive_store.save_text_as_google_doc(
-            f"{today}_{base_name}_議事録", minutes_markdown
-        )
-        drive_store.append_tasks(base_name, tasks)
-
-        notifier.send_minutes_notification(
-            meeting_title=base_name,
-            doc_url=drive_store.doc_url(minutes_doc_id),
-            task_sheet_url=drive_store.task_sheet_url(),
-            task_count=len(tasks),
-        )
+        pages = notion_client.find_unprocessed_pages()
     except Exception:
-        logger.exception("Notta webhook処理中にエラーが発生しました")
+        logger.exception("Notionの検索中にエラーが発生しました")
         return jsonify({"error": "internal_error"}), 500
 
-    return jsonify({"status": "processed", "transcription_id": transcription_id})
+    processed_ids = []
+    for page in pages:
+        page_id = page["id"]
+        try:
+            _process_page(page, page_id)
+            notion_client.mark_processed(page_id)
+            processed_ids.append(page_id)
+        except Exception:
+            logger.exception("ページ処理中にエラーが発生しました: page_id=%s", page_id)
+            # このページは処理済みにせず、次回のポーリングで再試行する
+
+    return jsonify({"found": len(pages), "processed": processed_ids})
+
+
+def _process_page(page: dict, page_id: str) -> None:
+    title = notion_client.extract_title(page)
+    transcript_text = notion_client.fetch_page_text(page_id)
+    if not transcript_text.strip():
+        logger.warning("本文が空のためスキップ: page_id=%s", page_id)
+        return
+
+    meta = {"title": title, "created_at": page.get("created_time")}
+    generated = minutes_generator.generate_minutes(transcript_text, meta)
+    minutes_markdown = generated["minutes_markdown"]
+    tasks = generated["tasks"]
+
+    today = datetime.date.today().isoformat()
+    drive_store.save_text_as_google_doc(f"{today}_{title}_文字起こし", transcript_text)
+    minutes_doc_id = drive_store.save_text_as_google_doc(f"{today}_{title}_議事録", minutes_markdown)
+    drive_store.append_tasks(title, tasks)
+
+    notifier.send_minutes_notification(
+        meeting_title=title,
+        doc_url=drive_store.doc_url(minutes_doc_id),
+        task_sheet_url=drive_store.task_sheet_url(),
+        task_count=len(tasks),
+    )
 
 
 if __name__ == "__main__":
