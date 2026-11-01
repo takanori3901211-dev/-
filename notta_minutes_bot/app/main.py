@@ -3,7 +3,7 @@ import logging
 
 from flask import Flask, jsonify, request
 
-from . import drive_store, minutes_generator, notta_client
+from . import drive_store, minutes_generator, notifier, notta_client
 from .config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -39,15 +39,25 @@ def notta_webhook():
             "created_at": result.get("created_at"),
         }
 
-        minutes_markdown = minutes_generator.generate_minutes(transcript_text, meta)
+        generated = minutes_generator.generate_minutes(transcript_text, meta)
+        minutes_markdown = generated["minutes_markdown"]
+        tasks = generated["tasks"]
 
         today = datetime.date.today().isoformat()
         base_name = meta.get("title") or transcription_id
         drive_store.save_text_as_google_doc(
             f"{today}_{base_name}_文字起こし", transcript_text
         )
-        drive_store.save_text_as_google_doc(
+        minutes_doc_id = drive_store.save_text_as_google_doc(
             f"{today}_{base_name}_議事録", minutes_markdown
+        )
+        drive_store.append_tasks(base_name, tasks)
+
+        notifier.send_minutes_notification(
+            meeting_title=base_name,
+            doc_url=drive_store.doc_url(minutes_doc_id),
+            task_sheet_url=drive_store.task_sheet_url(),
+            task_count=len(tasks),
         )
     except Exception:
         logger.exception("Notta webhook処理中にエラーが発生しました")
